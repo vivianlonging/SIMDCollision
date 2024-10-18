@@ -62,6 +62,8 @@ public static partial class Collisions {
     public static bool CircleToLine(Circle c, Vector2 start, Vector2 end) => Vector2.DistanceSquared(c.Position, ClosestPointOnLine(start, end, c.Position)) < c.RadiusSq;
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool CircleToPoint(Circle c, Vector2 point) => Vector2.DistanceSquared(c.Position, point) < c.RadiusSq;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static bool CircleToRect(Circle circle, RectangleF rect) => RectToCircle(rect, circle);
     #endregion
 
     #region Rect
@@ -69,7 +71,12 @@ public static partial class Collisions {
     public static bool CheckRect(RectangleF rectA, RectangleF rectB) => RectangleF.TestOverlap(rectA, rectB);
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool CheckRect(RectangleF rectA, RectangleF rectB, [ConstantExpected] EdgeCollisionRule rule) => RectangleF.TestOverlapWithRule(rectA, rectB, rule);
-
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool RectToCircle(RectangleF rect, Circle circle) {
+        Vector2 point = circle.Position;
+        Vector2 test = Vector2.Clamp(point, rect.Lower, rect.Upper);
+        return Vector2.DistanceSquared(point, test) < circle.RadiusSq;
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool RectToLine(RectangleF rect, Vector2 start, Vector2 end, EdgeCollisionRule rule) => RectToLine_Internal(rect.AsVector128(), VectorUtils.InCollisionForm(start), VectorUtils.InCollisionForm(end), rule);

@@ -44,7 +44,7 @@ public enum EdgeCollisionRule {
 
 public static class VectorUtils {
 
-
+    // Shuffle might be faster here, benchmark.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float PerpDot(Vector2 left, Vector2 right) => Vector2.Dot(left, new Vector2(right.Y, -right.X)); // left.X*right.Y - left.Y*right.X
 
