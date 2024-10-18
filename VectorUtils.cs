@@ -79,18 +79,18 @@ public static class VectorUtils {
     /// Use this *only* with structs with two floats in the values, e.g. Microsoft.Xna.Framework.Vector2.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static T AsVector2<T>(Vector2 vector) => Unsafe.As<Vector2, T>(ref vector);
+    public static T As<T>(Vector2 vector) => Unsafe.As<Vector2, T>(ref vector);
     /// <summary>
     /// Use this *only* with structs with three floats in the values, e.g. Microsoft.Xna.Framework.Vector3.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static T AsVector3<T>(Vector3 vector) => Unsafe.As<Vector3, T>(ref vector);
+    public static T As<T>(Vector3 vector) => Unsafe.As<Vector3, T>(ref vector);
     /// <summary>
     /// Use this *only* with structs with four floats in the values, e.g. Microsoft.Xna.Framework.Vector4.
     /// </summary>
     // This could also be used with Plane and Quaternion, but it doesn't work nicely, just trust me on that.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static T AsVector4<T>(Vector4 vector) => Unsafe.As<Vector4, T>(ref vector);
+    public static T As<T>(Vector4 vector) => Unsafe.As<Vector4, T>(ref vector);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RectangleF AsRectangleF(Vector128<float> v) => Unsafe.As<Vector128<float>, RectangleF>(ref v);
