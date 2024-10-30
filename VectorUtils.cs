@@ -70,10 +70,7 @@ public static class VectorUtils {
     // No fast WASM support yet :(
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector128<float> InCollisionForm(Vector2 self) {
-        if (Avx.IsSupported || AdvSimd.Arm64.IsSupported)
-            return Vector128.Create(Unsafe.BitCast<Vector2, double>(self)).AsSingle() ^ Vector128.Create(0, 0, 1 << 31, 1 << 31).AsSingle();
-        else
-            return Vector128.Create(self.X, self.Y, -self.X, -self.Y);
+        return Vector128.Create(Unsafe.BitCast<Vector2, double>(self)).AsSingle() ^ Vector128.Create(0, 0, 1 << 31, 1 << 31).AsSingle();
     }
     /// <summary>
     /// Use this *only* with structs with two floats in the values, e.g. Microsoft.Xna.Framework.Vector2.
