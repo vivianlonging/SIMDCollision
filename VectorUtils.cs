@@ -99,6 +99,13 @@ public static class VectorUtils {
     public static Vector128<float> Min(Vector128<float> a, Vector128<float> b) {
         if (Sse2.IsSupported) {
             return Sse2.Min(a, b);
+        } else if (Sse.IsSupported) {
+            // This actually doesn't have the correct NaN propagation, using Vector128.Max would be appropriate if you care about that.
+            var mask = Sse.CompareLessThan(a, b);    // _mm_cmplt_ps    | CMPPS
+            var sA = Sse.And(mask, a);               // _mm_and_ps      | ANDPS
+            var sB = Sse.AndNot(mask, b);            // _mm_andn_ps     | ANDNPS
+            return Sse.Or(sA, sB);                   // _mm_or_ps       | ORPS
+            // if for some reason you use this with AVX512, your and and or will be merged into a vpternlogd. wack
         } else if (AdvSimd.IsSupported) {
             return AdvSimd.Min(a, b);
         } else if (PackedSimd.IsSupported) {
@@ -111,7 +118,8 @@ public static class VectorUtils {
         if (Sse2.IsSupported) {
             return Sse2.Max(a, b);
         } else if (Sse.IsSupported) {
-            var mask = Sse.CompareGreaterThan(a, b);    // _mm_cmplt_ps    | CMPPS
+            // This actually doesn't have the correct NaN propagation, using Vector128.Max would be appropriate if you care about that.
+            var mask = Sse.CompareGreaterThan(a, b);    // _mm_cmpgt_ps    | CMPPS
             var sA = Sse.And(mask, a);               // _mm_and_ps      | ANDPS
             var sB = Sse.AndNot(mask, b);            // _mm_andn_ps     | ANDNPS
             return Sse.Or(sA, sB);                   // _mm_or_ps       | ORPS
