@@ -19,37 +19,37 @@ public struct RectangleF {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => left;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        set => SetLeft(value);
+        set => Move(new Vector2(value - left, 0f));
     }
     public float Top {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => top;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        set => SetTop(value);
+        set => Move(new Vector2(0, value - top));
     }
     public float Right {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => -nRight;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        set => SetRight(value);
+        set => Move(new Vector2(value + nRight, 0f));
     }
     public float Bottom {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => -nBottom;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        set => SetBottom(value);
+        set => Move(new Vector2(0, value + nBottom));
     }
     public float X {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => left;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        set => SetLeft(value);
+        set => Move(new Vector2(value - left, 0f));
     }
     public float Y {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => top;
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        set => SetTop(value);
+        set => Move(new Vector2(0, value - top));
     }
     public float Width {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -99,37 +99,34 @@ public struct RectangleF {
         top = position.Y;
         nBottom = -(position.Y + height);
     }
+    /// <summary>
+    /// Sets the left value of the rectangle without moving the rectangle to match. Use rectangle.Left = value for setting Left normally.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Raw_SetLeft(float value) { left = value; }
+    /// <summary>
+    /// Sets the top value of the rectangle without moving the rectangle to match. Use rectangle.Top = value for setting Top normally.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Raw_SetTop(float value) { top = value; }
+    /// <summary>
+    /// Sets the right value of the rectangle without moving the rectangle to match. Use rectangle.Right = value for setting Right normally.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Raw_SetRight(float value) { nRight = -value; }
+    /// <summary>
+    /// Sets the bottom value of the rectangle without moving the rectangle to match. Use rectangle.Bottom = value for setting Bottom normally.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void Raw_SetBottom(float value) { nBottom = -value; }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void SetLeft(float value, bool MoveRectangleWithChange = true) {
-        float diff = value - left;
-        if (MoveRectangleWithChange) nRight -= diff;
-        left += diff;
-    }
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void SetTop(float value, bool MoveRectangleWithChange = true) {
-        float diff = value - top;
-        if (MoveRectangleWithChange) nBottom -= diff;
-        top += diff;
-    }
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void SetRight(float value, bool MoveRectangleWithChange = true) {
-        float diff = nRight + value; // value - right
-        if (MoveRectangleWithChange) left += diff;
-        nRight -= diff;
-    }
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void SetBottom(float value, bool MoveRectangleWithChange = true) {
-        float diff = nBottom + value; // value - bottom
-        if (MoveRectangleWithChange) top += diff;
-        nBottom -= diff;
-    }
     /// <summary>
     /// Moves the rectangle some distance.
     /// </summary>
     /// <param name="change">The distance to move the rectangle.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Move(Vector2 change) => this = VectorUtils.AsRectangleF(this.AsVector128() + VectorUtils.InCollisionForm(change));
+
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Vector128<float> Wind() => Vector128.Shuffle(Vector128.Negate(this.AsVector128()), Vector128.Create(2, 3, 0, 1));
@@ -138,14 +135,16 @@ public struct RectangleF {
     /// Returns the union of two rectangles.<br/>
     /// min(a.Left, b.Left), min(a.Top, b.Top), max(a.Right, b.Right), max(a.Bottom, b.Bottom)
     /// </summary>
+    // x86- (V)MINPS       ARM - VMINNM
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static RectangleF Union(RectangleF a, RectangleF b) => VectorUtils.AsRectangleF(Vector128.Min(a.AsVector128(), b.AsVector128()));
+    public static RectangleF Union(RectangleF a, RectangleF b) => VectorUtils.AsRectangleF(VectorUtils.Min(a.AsVector128(), b.AsVector128()));
     /// <summary>
     /// Does <i><b>NOT</b></i> represent whether or not the two rectangles overlap. Returns the intersection of two rectangles.<br/>
     /// max(a.Left, b.Left), max(a.Top, b.Top), min(a.Right, b.Right), min(a.Bottom, b.Bottom)
     /// </summary>
+    // x86- (V)MAXPS       ARM - VMAXNM
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static RectangleF Intersection(RectangleF a, RectangleF b) => VectorUtils.AsRectangleF(Vector128.Max(a.AsVector128(), b.AsVector128()));
+    public static RectangleF Intersection(RectangleF a, RectangleF b) => VectorUtils.AsRectangleF(VectorUtils.Max(a.AsVector128(), b.AsVector128()));
 
     /// <summary>
     /// Tests if two AABB overlap.
@@ -156,7 +155,7 @@ public struct RectangleF {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TestOverlap(RectangleF a, RectangleF b) => TestOverlap(a.AsVector128(), b.AsVector128());
     /// <summary>
-    /// Tests if two AABB overlap, using vectorized instructions.
+    /// Tests if two AABB overlap, using vectorized instructions.<br/>Optimized for a *single* overlap, if you are testing one AABB against a set of AABBs, see documentation.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TestOverlap(Vector128<float> rectA, Vector128<float> rectB) {
@@ -164,13 +163,13 @@ public struct RectangleF {
         return Vector128.GreaterThanOrEqualAll(rectA, rectB);
     }
     /// <summary>
-    /// Tests if two AABB overlap with an Edge Condition, using Vectorized instructions.
+    /// Tests if two AABB overlap with an Edge Condition, using vectorized instructions.<br/>Optimized for a *single* overlap, if you are testing one AABB against a set of AABBs, see documentation.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TestOverlapWithRule(RectangleF rectA, RectangleF rectB, EdgeCollisionRule rule) {
-        var a = rectA.Wind();
-        var b = rectB.AsVector128();
-        var mask = VectorUtils.RuleToMask(rule);
+        var a = rectA.Wind(); // Inlined
+        var b = rectB.AsVector128(); // No operation. Just makes the C# compiler treat it as the right data
+        var mask = VectorUtils.RuleToMask(rule); // Inlined 
         var res = Vector128.GreaterThan(a, b).AsInt32() | (Vector128.Equals(a.AsInt32(), b.AsInt32()) & mask);
         return Vector128.EqualsAll(res, Vector128<int>.AllBitsSet);
     }

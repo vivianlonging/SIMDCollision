@@ -6,8 +6,10 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
+using System.Runtime.Intrinsics.Wasm;
 using System.Text;
 using System.Threading.Tasks;
+using System.Diagnostics.CodeAnalysis;
 
 namespace SIMDCollision;
 
@@ -91,5 +93,36 @@ public static class VectorUtils {
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RectangleF AsRectangleF(Vector128<float> v) => Unsafe.As<Vector128<float>, RectangleF>(ref v);
+
+
+    // So for some reason Vector128.Min/Max is fucking abysmal.
+    public static Vector128<float> Min(Vector128<float> a, Vector128<float> b) {
+        if (Sse2.IsSupported) {
+            return Sse2.Min(a, b);
+        } else if (AdvSimd.IsSupported) {
+            return AdvSimd.Min(a, b);
+        } else if (PackedSimd.IsSupported) {
+            return PackedSimd.Min(a, b);
+        } else {
+            return Vector128.Min(a, b);
+        }
+    }
+    public static Vector128<float> Max(Vector128<float> a, Vector128<float> b) {
+        if (Sse2.IsSupported) {
+            return Sse2.Max(a, b);
+        } else if (Sse.IsSupported) {
+            var mask = Sse.CompareGreaterThan(a, b);    // _mm_cmplt_ps    | CMPPS
+            var sA = Sse.And(mask, a);               // _mm_and_ps      | ANDPS
+            var sB = Sse.AndNot(mask, b);            // _mm_andn_ps     | ANDNPS
+            return Sse.Or(sA, sB);                   // _mm_or_ps       | ORPS
+            // if for some reason you use this with AVX512, your and and or will be merged into a vpternlogd. wack
+        } else if (AdvSimd.IsSupported) {
+            return AdvSimd.Max(a, b);
+        } else if (PackedSimd.IsSupported) {
+            return PackedSimd.Max(a, b);
+        } else {
+            return Vector128.Max(a, b);
+        }
+    }
 }
 

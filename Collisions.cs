@@ -93,6 +93,7 @@ public static partial class Collisions {
         //                           if rule & Rule.Left/Top/Right/Bottom == 0, this right side is all zeroes, aka "false", a || false = a
         Vector128<int> ruleCover = Vector128.Create((int)rule) & Vector128.Create(1, 2, 4, 8);
         Vector128<int> ruleMask = ~Vector128.Equals(ruleCover, Vector128<int>.Zero);
+        // These two lines above are equivalent to the RuleToMask function, but since we need the cover we have to write it manually here.
         // order is -x, -y, +x, +y or "left", "top", "right", "bottom" in worldspace - we order the checks according to Cohen-Sutherland in the if statement
         Vector128<int> outS = Vector128.LessThan(start, rect).AsInt32() | (Vector128.Equals(start.AsInt32(), rect.AsInt32()) & ruleMask);
         Vector128<int> outE = Vector128.LessThan(end, rect).AsInt32() | (Vector128.Equals(end.AsInt32(), rect.AsInt32()) & ruleMask);
