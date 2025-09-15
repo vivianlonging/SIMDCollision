@@ -83,7 +83,6 @@ public struct RectangleF {
     /// <summary>
     /// Gets the Rectangle as a 128bit vector, by reference. Values changed in the Vector will *not* translate over to the Rectangle without a cast back (VectorUtils.AsRectangleF)
     /// </summary>
-    /// <returns></returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Vector128<float> AsVector128() => Unsafe.As<RectangleF, Vector128<float>>(ref this);
 
@@ -127,9 +126,9 @@ public struct RectangleF {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void Move(Vector2 change) => this = VectorUtils.AsRectangleF(this.AsVector128() + VectorUtils.InCollisionForm(change));
 
-
+    // This order saves 1 instruction over Negate then Shuffle, on AVX. Lmao.
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Vector128<float> Wind() => Vector128.Shuffle(Vector128.Negate(this.AsVector128()), Vector128.Create(2, 3, 0, 1));
+    public Vector128<float> Wind() => Vector128.Negate(Vector128.Shuffle(this.AsVector128(), Vector128.Create(2, 3, 0, 1)));
 
     /// <summary>
     /// Returns the union of two rectangles.<br/>
@@ -137,14 +136,14 @@ public struct RectangleF {
     /// </summary>
     // x86- (V)MINPS       ARM - VMINNM
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static RectangleF Union(RectangleF a, RectangleF b) => VectorUtils.AsRectangleF(VectorUtils.Min(a.AsVector128(), b.AsVector128()));
+    public static RectangleF Union(RectangleF a, RectangleF b) => VectorUtils.AsRectangleF(Vector128.MinNative(a.AsVector128(), b.AsVector128()));
     /// <summary>
     /// Does <i><b>NOT</b></i> represent whether or not the two rectangles overlap. Returns the intersection of two rectangles.<br/>
     /// max(a.Left, b.Left), max(a.Top, b.Top), min(a.Right, b.Right), min(a.Bottom, b.Bottom)
     /// </summary>
     // x86- (V)MAXPS       ARM - VMAXNM
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static RectangleF Intersection(RectangleF a, RectangleF b) => VectorUtils.AsRectangleF(VectorUtils.Max(a.AsVector128(), b.AsVector128()));
+    public static RectangleF Intersection(RectangleF a, RectangleF b) => VectorUtils.AsRectangleF(Vector128.MaxNative(a.AsVector128(), b.AsVector128()));
 
     /// <summary>
     /// Tests if two AABB overlap.
@@ -152,14 +151,28 @@ public struct RectangleF {
     /// <param name="a">Rectangle A</param>
     /// <param name="b">Rectangle B</param>
     /// <returns>Whether or not the two rectangles overlapped</returns>
+    // the Rectangle "A" gets "wound" from (minX, minY, -maxX, -maxY) to (maxX, maxY, -minX, -minY). The calculation for overlaps can be simplified down to:
+    //    a[0] >= b[0]      a[1] >= b[1]       a[2] >= b[2]        a[3] >= b[3]
+    // (a.maxX >= b.minX, a.maxY >= b.minY, a.-minX >= b.-maxX, a.-minY >= b.-maxY)
+    //                                      divide by -1
+    // (a.maxX >= b.minX, a.maxY >= b.minY, a.minX  <= b.maxX , a.minY  <= b.maxY )
+    // These are the four tests for standard overlap, and if all of them are true, then we have a collision!
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TestOverlap(RectangleF a, RectangleF b) => TestOverlap(a.AsVector128(), b.AsVector128());
     /// <summary>
     /// Tests if two AABB overlap, using vectorized instructions.<br/>Optimized for a *single* overlap, if you are testing one AABB against a set of AABBs, see documentation.
     /// </summary>
+    // x86: vpermilps xmm0, [esp+0x14], 0x4e    ; load and shuffle a into 2 3 0 1 order (replaced with movups shufps 78 without avx)
+    //      vxorps xmm0, xmm0, ALLBITSSET       ; negation of a
+    //      vcmpgeps xmm0, xmm0, [esp + 4]      ; for each float: xmm0[i] = a[i] >= b[i] ? ALLBITSSET : 0
+    //      vpcmpeqd xmm1, xmm1, xmm1           ; xmm1 = ALLBITSSET
+    //      vptest xmm0, xmm1                   ; if xmm0[1:4] == ALLBITSSET (aka all of the tests above are true), return 1 else 0
+    //      setb al                             ; read the previous value on the stack and set b to the value (pops the CF flag?)
+    //      movzx eax, al                       ; moves the zf register to eax for returning
+    //      ret 0x20
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool TestOverlap(Vector128<float> rectA, Vector128<float> rectB) {
-        rectA = Vector128.Shuffle(-rectA, Vector128.Create(2, 3, 0, 1));
+        rectA = Vector128.Negate(Vector128.Shuffle(rectA, Vector128.Create(2, 3, 0, 1)));
         return Vector128.GreaterThanOrEqualAll(rectA, rectB);
     }
     /// <summary>
@@ -173,4 +186,8 @@ public struct RectangleF {
         var res = Vector128.GreaterThan(a, b).AsInt32() | (Vector128.Equals(a.AsInt32(), b.AsInt32()) & mask);
         return Vector128.EqualsAll(res, Vector128<int>.AllBitsSet);
     }
+    // If you're here for one against a set of AABBs,
+    // Wind A yourself and test overlaps with rectangle B by converting to AsVector128 and then running TestOverlap (which will get inlined).
+    // Only one rectangle needs to "change" for the function to work,
+    // so changing the "one" that the set goes against means you dont need to change the set (i.e. more instructions)
 }

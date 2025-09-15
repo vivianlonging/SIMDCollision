@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace SIMDCollision; 
 public struct Circle {
-    public float X; public float Y; public float radius;
+    public float X; public float Y; private float radius; private float radiusSq;
     public Circle(float x, float y, float radius) {
         X = x;
         Y = y;
@@ -20,12 +20,16 @@ public struct Circle {
         Y = position.Y;
         this.radius = radius;
     }
-    public Vector2 Position { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => AsVector128(this).AsVector2(); }
-    public float Radius { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => radius; }
-    public float RadiusSq { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => radius * radius; }
+    public Vector2 Position { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => this.AsVector128().AsVector2(); }
+    public float Radius {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] get => radius;
+        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)] set { radius = value; radiusSq = value * value; }
+    }
+    public float RadiusSq { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => radiusSq; }
 
     // Vectorized swappers
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static Circle AsCircle(Vector128<float> values) => Unsafe.BitCast<Vector3, Circle>(values.AsVector3());
-    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static Vector128<float> AsVector128(Circle circle) => Unsafe.As<Circle, Vector128<float>>(ref circle);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static Circle AsCircle(Vector128<float> values) => Unsafe.As<Vector128<float>, Circle>(ref values);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public Vector128<float> AsVector128() => Unsafe.As<Circle, Vector128<float>>(ref this);
 }

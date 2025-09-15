@@ -46,23 +46,19 @@ public enum EdgeCollisionRule {
 
 public static class VectorUtils {
 
-    // Shuffle might be faster here, benchmark.
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static float PerpDot(Vector2 left, Vector2 right) => Vector2.Dot(left, new Vector2(right.Y, -right.X)); // left.X*right.Y - left.Y*right.X
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector128<int> RuleToMask(EdgeCollisionRule rule) => ~Vector128.Equals(Vector128.Create((int)rule) & Vector128.Create(1, 2, 4, 8), Vector128<int>.Zero);
 
+
     /// <summary>
-    /// Loads the Vector2 as a 128bit vector in the format that collisions use.
+    /// Loads the Vector2 as left 128bit vector in the format that collisions use.
     /// </summary>
     /// <param name="self">Vector2</param>
     /// <returns>Vector128 used for vectorized collisions.</returns>
-    // x86: vzeroupper (AVX512?)
-    //      vmovq       xmm0, rdx
-    //      vmovddup    xmm0, xmm0
-    //      vxorps      xmm0, xmm0, Const
-    //      Further instructions to return __m128 in rax
+    // x86: vmovddup xmm0, [esp+4]
+    //      vxorps xmm0, xmm0, [VectorUtils.InCollisionForm(System.Numerics.Vector2)]
+    //      vmovups [ecx], xmm0
+    //      ret 8
     // ARM: (estimate)
     //      mov         r1, ???
     //      LD1R        Vt.2D r1
@@ -74,6 +70,8 @@ public static class VectorUtils {
     public static Vector128<float> InCollisionForm(Vector2 self) {
         return Vector128.Create(Unsafe.BitCast<Vector2, double>(self)).AsSingle() ^ Vector128.Create(0, 0, 1 << 31, 1 << 31).AsSingle();
     }
+
+
     /// <summary>
     /// Use this *only* with structs with two floats in the values, e.g. Microsoft.Xna.Framework.Vector2.
     /// </summary>
@@ -94,43 +92,12 @@ public static class VectorUtils {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static RectangleF AsRectangleF(Vector128<float> v) => Unsafe.As<Vector128<float>, RectangleF>(ref v);
 
+    // While this can be optimized further, I've chosen not to as the code complexity would grow significantly and be dependent on architecture.
+    // If you already know what architecture you're optimizing for, why are you using C# :3
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float PerpDot(Vector128<float> left, Vector128<float> right) => Vector128.Dot(left, Vector128.Shuffle(right, Vector128.Create(1,0,2,3)) * Vector128.Create(-1f, 1f, 0f, 0f));
 
-    // So for some reason Vector128.Min/Max is fucking abysmal.
-    public static Vector128<float> Min(Vector128<float> a, Vector128<float> b) {
-        if (Sse2.IsSupported) {
-            return Sse2.Min(a, b);
-        } else if (Sse.IsSupported) {
-            // This actually doesn't have the correct NaN propagation, using Vector128.Max would be appropriate if you care about that.
-            var mask = Sse.CompareLessThan(a, b);    // _mm_cmplt_ps    | CMPPS
-            var sA = Sse.And(mask, a);               // _mm_and_ps      | ANDPS
-            var sB = Sse.AndNot(mask, b);            // _mm_andn_ps     | ANDNPS
-            return Sse.Or(sA, sB);                   // _mm_or_ps       | ORPS
-            // if for some reason you use this with AVX512, your and and or will be merged into a vpternlogd. wack
-        } else if (AdvSimd.IsSupported) {
-            return AdvSimd.Min(a, b);
-        } else if (PackedSimd.IsSupported) {
-            return PackedSimd.Min(a, b);
-        } else {
-            return Vector128.Min(a, b);
-        }
-    }
-    public static Vector128<float> Max(Vector128<float> a, Vector128<float> b) {
-        if (Sse2.IsSupported) {
-            return Sse2.Max(a, b);
-        } else if (Sse.IsSupported) {
-            // This actually doesn't have the correct NaN propagation, using Vector128.Max would be appropriate if you care about that.
-            var mask = Sse.CompareGreaterThan(a, b);    // _mm_cmpgt_ps    | CMPPS
-            var sA = Sse.And(mask, a);               // _mm_and_ps      | ANDPS
-            var sB = Sse.AndNot(mask, b);            // _mm_andn_ps     | ANDNPS
-            return Sse.Or(sA, sB);                   // _mm_or_ps       | ORPS
-            // if for some reason you use this with AVX512, your and and or will be merged into a vpternlogd. wack
-        } else if (AdvSimd.IsSupported) {
-            return AdvSimd.Max(a, b);
-        } else if (PackedSimd.IsSupported) {
-            return PackedSimd.Max(a, b);
-        } else {
-            return Vector128.Max(a, b);
-        }
-    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float PerpDot(Vector2 left, Vector2 right) => Vector128.Dot(left.AsVector128Unsafe(), Vector128.Shuffle(right.AsVector128Unsafe(), Vector128.Create(1, 0, 2, 3)) * Vector128.Create(-1f, 1f, 0f, 0f));
 }
 

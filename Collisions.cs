@@ -5,6 +5,9 @@ using System.Linq;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.Wasm;
+using System.Runtime.Intrinsics.X86;
 using System.Text;
 using System.Threading.Tasks;
 using static System.Collections.Specialized.BitVector32;
@@ -12,6 +15,7 @@ using static System.Collections.Specialized.BitVector32;
 namespace SIMDCollision;
 public static partial class Collisions {
     #region Point
+    // Trying to optimize these results in worse code usually
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool CheckPoint(Vector2 a, Vector2 b) => a == b;
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -19,24 +23,38 @@ public static partial class Collisions {
     #endregion
 
     #region Line
-    internal static bool onSegment(Vector2 p, Vector2 q, Vector2 r) {
-        Vector128<float> _p = VectorUtils.InCollisionForm(p);
-        Vector128<float> _q = VectorUtils.InCollisionForm(q);
-        Vector128<float> _r = VectorUtils.InCollisionForm(r);
-        return Vector128.LessThanOrEqualAll(_q, Vector128.Max(_p, _r));
+    internal static bool onSegment(Vector128<float> p, Vector128<float> q, Vector128<float> r) {
+        return Vector128.LessThanOrEqualAll(q, Vector128.MaxNative(p, r));
     }
+    // 0bS EEEEEEEEFFFFFFFFFFFFFFFFFFFFFFF
+// becomes
+    // 0bS  any !=0 => 0x00...01
+    // This breaks on NaN propagation as well as -0, however since we bitcast back to floats for 0 cost later, this resolves itself.
+    internal static int fSign(float f) {
+        int i = BitConverter.SingleToInt32Bits(f);
+        return i & (1 << 31) // sign bit preserved
+            | Convert.ToInt32(Convert.ToBoolean(i & 2147483647)); // !!(i & 0x7fffffff)
+    }
+
     public static bool LineCheck(Vector2 aFrom, Vector2 aTo, Vector2 bFrom, Vector2 bTo) {
-        // orientation is: Math.Sign(Vector2.PerpDot(b - a, c - b));
-        int o1 = Math.Sign(VectorUtils.PerpDot(bFrom - aFrom, aTo - bFrom));
-        int o2 = Math.Sign(VectorUtils.PerpDot(bFrom - aFrom, bTo - bFrom));
-        int o3 = Math.Sign(VectorUtils.PerpDot(bTo - aTo, aFrom - bTo));
-        int o4 = Math.Sign(VectorUtils.PerpDot(bTo - aTo, bFrom - bTo));
-        if (o1 != o2 && o3 != o4) return true;
-        else if (o1 == 0 && onSegment(aFrom, aTo, bFrom)) return true; // aFrom, bFrom, and aTo are collinear and aTo lies on segment aFrom-bFrom
-        else if (o2 == 0 && onSegment(aFrom, bTo, bFrom)) return true; // aFrom, bFrom, and bTo are collinear and bTo lies on segment aFrom-bFrom
-        else if (o3 == 0 && onSegment(aTo, aFrom, bTo)) return true; // aTo, bTo, and aFrom are collinear and aFrom lies on segment aTo-bTo
-        else if (o4 == 0 && onSegment(aTo, bFrom, bTo)) return true; //aTo, bTo, and bFrom are collinear and bFrom lies on segment aTo-bTo
-        return false;
+        Vector128<float> af = aFrom.AsVector128Unsafe(), at = aTo.AsVector128Unsafe(), bf = bFrom.AsVector128Unsafe(), bt = bTo.AsVector128Unsafe();
+        Vector128<float> dF = bf - af; Vector128<float> dT = bt - at;
+        // variation of sign that breaks NaN propagation in exchange for a lot of speedup
+        dF = Vector128.Create(VectorUtils.PerpDot(dF, at - bf),
+                              VectorUtils.PerpDot(dF, bt - bf),
+                              VectorUtils.PerpDot(dT, af - bt),
+                              VectorUtils.PerpDot(dT, bf - bt));
+        dT = Vector128.Create(2147483647).AsSingle();
+        dF = ((dF.AsInt32() & Vector128.Create(1 << 31)) 
+             | (Vector128.Equals(dF.AsInt32() & dT.AsInt32(), Vector128<int>.Zero) & dT.AsInt32())
+            ).AsSingle();
+
+        if (dF[0] != dF[1] && dF[2] != dF[3]) return true;
+        else
+            return (dF[0] == 0 && onSegment(af, at, bf)) || // aFrom, bFrom, and aTo are collinear and aTo lies on segment aFrom-bFrom
+                   (dF[1] == 0 && onSegment(af, bt, bf)) || // aFrom, bFrom, and bTo are collinear and bTo lies on segment aFrom-bFrom
+                   (dF[2] == 0 && onSegment(at, af, bt)) || // aTo, bTo, and aFrom are collinear and aFrom lies on segment aTo-bTo
+                   (dF[3] == 0 && onSegment(at, bf, bt));   //aTo, bTo, and bFrom are collinear and bFrom lies on segment aTo-bTo
     }
     [MethodImpl(MethodImplOptions.AggressiveInlining)] public static bool LineToCircle(Vector2 start, Vector2 end, Circle circle) => CircleToLine(circle, start, end);
     [MethodImpl(MethodImplOptions.AggressiveInlining)] public static bool LineToRect(Vector2 start, Vector2 end, RectangleF rect, EdgeCollisionRule rule) => RectToLine(rect, start, end, rule);
@@ -44,24 +62,36 @@ public static partial class Collisions {
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector2 ClosestPointOnLine(Vector2 start, Vector2 end, Vector2 closestTo) {
-        Vector2 v = end - start;
-        float t = Vector2.Dot(closestTo - start, v) / Vector2.Dot(v, v);
-        t = float.Clamp(t, 0f, 1f);
-        return start + v * t;
+        if (Sse41.IsSupported) {
+            // This saves a few instructions
+            Vector128<float> s = start.AsVector128Unsafe(), e = end.AsVector128Unsafe(), c = closestTo.AsVector128Unsafe(),
+                             v = e - s;
+            // DotProduct with control byte only calcs dp on bits set
+            e = Vector128.ClampNative(
+                Sse41.DotProduct(c - s, v, 0b00110011) / Sse41.DotProduct(v, v, 0b00110011),
+                Vector128<float>.Zero, Vector128<float>.One);
+            return (s + v * e).AsVector2();
+        } else { // No other instruction set has a dotproduct/horizontal add with a bitmask.
+            Vector128<float> s = start.AsVector128(), e = end.AsVector128(), c = closestTo.AsVector128();
+            Vector128<float> v = e - s;
+            float t = Vector128.Dot(c - s, v) / Vector128.Dot(v, v);
+            t = float.Clamp(t, 0f, 1f);
+            return (s + v * t).AsVector2();
+        }
     }
     #endregion
 
     #region Circle
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool CheckCircle(Circle c1, Circle c2) {
-        float r = c1.Radius + c2.Radius;
-        return Vector2.DistanceSquared(c1.Position, c2.Position) < r * r;
+    public static bool CheckCircle(Circle circle1, Circle circle2) {
+        Vector128<float> c1 = circle1.AsVector128(), c2 = circle2.AsVector128();
+        float r = c1[2] + c2[2];
+        Vector128<float> c3 = (c2 - c1) * Vector128.Create(1f,1f,0f,0f);
+        return Vector128.Dot(c3,c3) < r * r;
     }
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool CircleToLine(Circle c, Vector2 start, Vector2 end) => Vector2.DistanceSquared(c.Position, ClosestPointOnLine(start, end, c.Position)) < c.RadiusSq;
+    public static bool CircleToLine(Circle circle, Vector2 start, Vector2 end) => Vector2.DistanceSquared(circle.Position, ClosestPointOnLine(start, end, circle.Position)) < circle.RadiusSq;
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool CircleToPoint(Circle c, Vector2 point) => Vector2.DistanceSquared(c.Position, point) < c.RadiusSq;
+    public static bool CircleToPoint(Circle circle, Vector2 point) => Vector2.DistanceSquared(circle.Position, point) < circle.RadiusSq;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)] public static bool CircleToRect(Circle circle, RectangleF rect) => RectToCircle(rect, circle);
     #endregion
@@ -74,7 +104,7 @@ public static partial class Collisions {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool RectToCircle(RectangleF rect, Circle circle) {
         Vector2 point = circle.Position;
-        Vector2 test = Vector2.Clamp(point, rect.Lower, rect.Upper);
+        Vector2 test = Vector2.ClampNative(point, rect.Lower, rect.Upper);
         return Vector2.DistanceSquared(point, test) < circle.RadiusSq;
     }
 
