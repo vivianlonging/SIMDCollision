@@ -8,9 +8,6 @@ using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.Wasm;
 using System.Runtime.Intrinsics.X86;
-using System.Text;
-using System.Threading.Tasks;
-using static System.Collections.Specialized.BitVector32;
 
 namespace SIMDCollision;
 public static partial class Collisions {
@@ -20,6 +17,24 @@ public static partial class Collisions {
     public static bool CheckPoint(Vector2 a, Vector2 b) => a == b;
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool CheckPoint(Vector2 a, Vector2 b, float discrepancy) => Vector128.LessThanOrEqualAll(Vector128.Abs(b.AsVector128() - a.AsVector128()), Vector128.Create(discrepancy));
+
+    /// <summary>
+    /// Checks whether a point lands on the *infinite* line of which start and p lie. Does not account for segments. Search "collinear" for more info.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static unsafe bool Line_Point_Collinear(Vector2 start, Vector2 end, Vector2 point) {
+        float d = VectorUtils.PerpDot(start - point, point - end);
+        return *(int*)(&d) == 0; // Yes this unsafe variation is actually a bit faster lol
+    }
+    // Check that start.X < point.X < p.X, then check for collinearity.
+    public static bool PointToLine(Vector2 start, Vector2 end, Vector2 point) {
+        if (start.X > point.X || point.X > end.X) return false;
+        return Line_Point_Collinear(start, end, point);
+    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static bool PointToRect(Vector2 point, RectangleF rect) => RectToPoint(rect, point);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool PointToCircle(Vector2 point, Circle circle) => CircleToPoint(circle, point);
     #endregion
 
     #region Line
@@ -30,24 +45,29 @@ public static partial class Collisions {
 // becomes
     // 0bS  any !=0 => 0x00...01
     // This breaks on NaN propagation as well as -0, however since we bitcast back to floats for 0 cost later, this resolves itself.
-    internal static int fSign(float f) {
+    internal static int fastSign(float f) {
         int i = BitConverter.SingleToInt32Bits(f);
         return i & (1 << 31) // sign bit preserved
             | Convert.ToInt32(Convert.ToBoolean(i & 2147483647)); // !!(i & 0x7fffffff)
+    }
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    // Values: 0x00000000 = sign of 0, 0x80000001 = sign of -1, 0x00000001 = sign of 1
+    // Works cleanly for ==/!= and *fine* for <0,>0 (these values correspond to -1e-45,0,1e-45
+    internal static Vector128<float> v_fastSign(Vector128<float> f) {
+        return ((f.AsInt32() & Vector128.Create(1 << 31)) |
+                (Vector128.Equals(f.AsInt32() & Vector128.Create(2147483647).AsInt32(), Vector128<int>.Zero) & Vector128.Create(2147483647).AsInt32())
+                ).AsSingle();
     }
 
     public static bool LineCheck(Vector2 aFrom, Vector2 aTo, Vector2 bFrom, Vector2 bTo) {
         Vector128<float> af = aFrom.AsVector128Unsafe(), at = aTo.AsVector128Unsafe(), bf = bFrom.AsVector128Unsafe(), bt = bTo.AsVector128Unsafe();
         Vector128<float> dF = bf - af; Vector128<float> dT = bt - at;
         // variation of sign that breaks NaN propagation in exchange for a lot of speedup
-        dF = Vector128.Create(VectorUtils.PerpDot(dF, at - bf),
-                              VectorUtils.PerpDot(dF, bt - bf),
-                              VectorUtils.PerpDot(dT, af - bt),
-                              VectorUtils.PerpDot(dT, bf - bt));
-        dT = Vector128.Create(2147483647).AsSingle();
-        dF = ((dF.AsInt32() & Vector128.Create(1 << 31)) 
-             | (Vector128.Equals(dF.AsInt32() & dT.AsInt32(), Vector128<int>.Zero) & dT.AsInt32())
-            ).AsSingle();
+        dF = v_fastSign(Vector128.Create(VectorUtils.PerpDot(dF, at - bf),
+                                         VectorUtils.PerpDot(dF, bt - bf),
+                                         VectorUtils.PerpDot(dT, af - bt),
+                                         VectorUtils.PerpDot(dT, bf - bt)));
+        
 
         if (dF[0] != dF[1] && dF[2] != dF[3]) return true;
         else
@@ -58,7 +78,7 @@ public static partial class Collisions {
     }
     [MethodImpl(MethodImplOptions.AggressiveInlining)] public static bool LineToCircle(Vector2 start, Vector2 end, Circle circle) => CircleToLine(circle, start, end);
     [MethodImpl(MethodImplOptions.AggressiveInlining)] public static bool LineToRect(Vector2 start, Vector2 end, RectangleF rect, EdgeCollisionRule rule) => RectToLine(rect, start, end, rule);
-
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] public static bool LineToPoint(Vector2 start, Vector2 end, Vector2 point) => PointToLine(start, end, point);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector2 ClosestPointOnLine(Vector2 start, Vector2 end, Vector2 closestTo) {
@@ -102,6 +122,8 @@ public static partial class Collisions {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool CheckRect(RectangleF rectA, RectangleF rectB, [ConstantExpected] EdgeCollisionRule rule) => RectangleF.TestOverlapWithRule(rectA, rectB, rule);
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool RectToPoint(RectangleF rect, Vector2 point) => RectangleF.TestPointInRectangle(rect, point);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool RectToCircle(RectangleF rect, Circle circle) {
         Vector2 point = circle.Position;
         Vector2 test = Vector2.ClampNative(point, rect.Lower, rect.Upper);
@@ -135,7 +157,7 @@ public static partial class Collisions {
                 Vector2 v = Vector2.Zero;
                 // equivalent to movemask, but is actually crossplatform.
                 int s = Vector128.Dot(outS & ruleCover, Vector128.Create(1)); // Dot Product against <1,1,1,1>, we're making the assumption that most hardware uses the appropriate intrinsic for this.
-                int e = Vector128.Dot(outE & ruleCover, Vector128.Create(1));
+                int e = Vector128.Dot(outE & ruleCover, Vector128.Create(1)); // Future edit: IT DOESN"T USE THE CORRECT INTRINSICS frdhwefdsj
                 bool a = e > s;
                 int b = a ? e : s;
                 // I added these elses based on the Wikipedia article doing so. Might be worth keeping an eye on.
